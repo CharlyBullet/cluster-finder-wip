@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <fstream>
 #include <chrono>
+#include <thread>
+#include <mutex>
 
 namespace Finder
 {
@@ -16,13 +18,21 @@ namespace Finder
 
     std::vector<std::pair<int, int>> _chunkOffsets;
     std::vector<std::tuple<int, int, int>> Candidates;
+    std::mutex candidatesMutex;
+    std::mutex progressMutex;
 
-    int _length;
-    int _chunkHalf;
+    const int _length = 160000; //1600000;
+    int _chunkHalf = _length / 32;
+
+    struct ThreadParams {
+        int StartX;
+        int StopX;
+        int ChunkHalfLength;
+        std::atomic<int> PercentComplete;
+        std::atomic<bool> Complete;
+    };
 
     bool isSlimeChunk(int x, int z) {
-        //check long vs long long for extend biomes
-        // new Random(seed + (long) (i * i * 4987142) + (long) (i * 5947611) + (long) (j * j) * 4392871L + (long) (j * 389711) ^ 987234911L).nextInt(10) == 0
         long seed = ((_worldSeed + (long)(x * x * 4987142) + (long)(x * 5947611) + (long)(z * z) * 4392871L + (long)(z * 389711) ^ 987234911L) ^ 0x5DEECE66DL) & ((1L << 48) - 1);
         int bits, val;
         do {
@@ -37,7 +47,6 @@ namespace Finder
         std::vector<std::pair<int, int>> offsets;
         for (int i = -8; i < 9; i++) {
             for (int j = -8; j < 9; j++) {
-                //player radius (16 chunks ≡ 128 blocks /// 8 render distance)
                 if (std::sqrt(i * i + j * j) <= 8.0) {
                     offsets.emplace_back(i, j);
                 }
@@ -46,52 +55,78 @@ namespace Finder
         return offsets;
     }
 
-    std::vector<std::tuple<int, int, int>> ProcessChunk(int startX, int stopX, int chunkHalf) {
-        std::vector<std::tuple<int, int, int>> localCandidates;
+    void ProcessChunk(ThreadParams& tParams) {
+        int startX = tParams.StartX;
+        int stopX = tParams.StopX;
+        int chunkHalfLength = tParams.ChunkHalfLength;
+        int diff = stopX - startX;
 
         for (int i = startX; i < stopX; i++) {
-            for (int j = -chunkHalf + 8; j < chunkHalf / 2 - 7; j++) {
+            int percentComplete = static_cast<int>(((i - startX) / static_cast<double>(diff)) * 100);
+            if (percentComplete > tParams.PercentComplete.load()) {
+                tParams.PercentComplete.store(percentComplete);
+            }
+
+            for (int j = -chunkHalfLength + 8; j < chunkHalfLength / 2 - 7; j++) {
                 int slimeRadiusCounter = 0;
-                for (const auto& offset : _chunkOffsets) {
-                    if (isSlimeChunk(i + offset.first, j + offset.second)) {
-                        slimeRadiusCounter++;
+                for (const auto& delta : _chunkOffsets) {
+                    if (isSlimeChunk(i + delta.first, j + delta.second)) {
+                        ++slimeRadiusCounter;
                     }
                 }
                 if (slimeRadiusCounter >= _minim) {
-                    localCandidates.emplace_back(i, j, slimeRadiusCounter);
+                    std::lock_guard<std::mutex> lock(candidatesMutex);
+                    Candidates.emplace_back(i, j, slimeRadiusCounter);
                 }
             }
         }
-
-        return localCandidates;
+        tParams.Complete.store(true);
     }
 
     void BruteForce() {
         int sectionLength = (_chunkHalf * 2 - 16) / _threads;
-        std::vector<std::future<std::vector<std::tuple<int, int, int>>>> futures;
-        for (int i = 0; i < _threads; i++) {
-            int startX = -_chunkHalf + 8 + i * sectionLength;
-            int stopX = i == _threads - 1 ? _chunkHalf - 8 : -_chunkHalf + 8 + ((i + 1) * sectionLength);
-            //Chequear async!!!
-            futures.push_back(std::async(std::launch::async, ProcessChunk, startX, stopX, _chunkHalf));
+        std::vector<std::thread> threads;
+        std::vector<ThreadParams> threadParams(_threads);
+
+        for (int i = 0; i < _threads; ++i) {
+            threadParams[i].StartX = -_chunkHalf + 8 + i * sectionLength;
+            threadParams[i].StopX = (i == _threads - 1) ? _chunkHalf - 8 : -_chunkHalf + 8 + ((i + 1) * sectionLength);
+            threadParams[i].ChunkHalfLength = _chunkHalf;
+            threadParams[i].PercentComplete = 0;
+            threadParams[i].Complete = false;
+
+            threads.emplace_back(ProcessChunk, std::ref(threadParams[i]));
         }
 
-        for (auto& future : futures) {
-            auto result = future.get();
-            Candidates.insert(Candidates.end(), result.begin(), result.end());
+        double threadWeight = 1.0 / _threads;
+        long greatestTotalMemory = 0;
+        while (!std::all_of(threadParams.begin(), threadParams.end(), [](const ThreadParams& tp) { return tp.Complete.load(); })) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+            std::string threadPercentLine = "";
+            double percentComplete = 0.0;
+            for (const auto& tp : threadParams) {
+                percentComplete += tp.PercentComplete.load() / 100.0 * threadWeight;
+                threadPercentLine += "\t" + std::to_string(tp.PercentComplete.load()) + "%";
+            }
+
+            if (percentComplete > greatestTotalMemory) {
+                greatestTotalMemory = percentComplete;
+            }
+
+            std::cout << "\rTotal: " << percentComplete * 100 << "%   Individual:" << threadPercentLine;
         }
 
-        std::cout << "search complete\n";
+        std::cout << "\nBrute force search complete using " << (greatestTotalMemory / static_cast<double>(1000000000)) << "GB\n";
     }
 
- void Printer() {
-        //Sort and print top 10
+    void Printer() {
         std::sort(Candidates.begin(), Candidates.end(), [](const auto& lhs, const auto& rhs) {
             return std::get<2>(lhs) > std::get<2>(rhs);
         });
 
         std::ofstream outFile("candidates.txt");
-        outFile << "found " << Candidates.size() << " candidates with max of " << std::get<2>(Candidates.front()) << " slime chunks\n";
+        outFile << "Found " << Candidates.size() << " candidates with a max of " << std::get<2>(Candidates.front()) << " slime chunks\n";
         for (const auto& candidate : Candidates) {
             outFile << std::get<0>(candidate) << ", " << std::get<1>(candidate) << ", " << std::get<2>(candidate) << "\n";
         }
@@ -111,7 +146,6 @@ namespace Finder
         std::chrono::duration<double> elapsed = end - start;
         std::cout << actionName << " completed in " << elapsed.count() << " seconds\n";
     }
-
 
     void Run() {
         _chunkOffsets = CreateChunkOffsets();
