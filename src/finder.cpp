@@ -12,9 +12,9 @@
 class Program {
 private:
     const long long _worldSeed = 423338365327502521;
-    const int _threshold = 5;
+    const int _threshold = 45;
     const int _threadCount = 8;
-    const int _length = 16000;
+    const int _length = 160000;
     int _chunkHalfLength = _length / 32;
     std::vector<std::pair<int, int>> _offsets;
     std::vector<std::tuple<int, int, int>> Candidates;
