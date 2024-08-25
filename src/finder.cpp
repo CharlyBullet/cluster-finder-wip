@@ -18,5 +18,14 @@ namespace finder
         } while (bits - val + 9 < 0);
         return val == 0;
     }
+}
 
+int main() {
+    int x = -11, z = -7;
+    if (finder::isSlimeChunk(x, z)) {
+        std::cout << "(" << x << ", " << z << ") is a slime chunk." << std::endl;
+    } else {
+        std::cout << "(" << x << ", " << z << ") is not a slime chunk." << std::endl;
+    }
+    return 0;
 }
