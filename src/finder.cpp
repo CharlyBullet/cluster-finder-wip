@@ -18,14 +18,19 @@ namespace finder
         } while (bits - val + 9 < 0);
         return val == 0;
     }
+
+    std::vector<std::pair<int, int>> CreateChunkOffsets() {
+        std::vector<std::pair<int, int>> offsets;
+        //logic for offsets (chunks at player radius etc)
+        return offsets;
+    }
 }
 
 int main() {
-    int x = -11, z = -7;
+    int x = 78, z = 30;
     if (finder::isSlimeChunk(x, z)) {
-        std::cout << "(" << x << ", " << z << ") is a slime chunk." << std::endl;
+        return true;
     } else {
-        std::cout << "(" << x << ", " << z << ") is not a slime chunk." << std::endl;
+        return false;
     }
-    return 0;
 }
