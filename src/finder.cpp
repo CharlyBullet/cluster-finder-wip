@@ -11,10 +11,10 @@
 
 class Program {
 private:
-    const long long _worldSeed = 423338365327502521;
+    const long long _worldSeed = -8978430309572744422L;
     const int _threshold = 45;
     const int _threadCount = 8;
-    const int _length = 160000;
+    const int _length = 200000;
     int _chunkHalfLength = _length / 32;
     std::vector<std::pair<int, int>> _offsets;
     std::vector<std::tuple<int, int, int>> Candidates;
@@ -117,7 +117,7 @@ public:
     }
 };
 
-int main() {
+int main() { //T(2.n²) n = _length
     Program program;
     program.Run();
     return 0;
